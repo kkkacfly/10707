@@ -821,7 +821,6 @@
       42 ./image-2-000418.txt
       37 ./image-2-000419.txt
       32 ./image-2-000420.txt
-      46 ./image-2-000421.txt
       40 ./image-3-000001.txt
       43 ./image-3-000002.txt
       43 ./image-3-000003.txt
