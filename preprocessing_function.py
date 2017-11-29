@@ -29,7 +29,7 @@ def get_gt_density(filename, dim, dim_resize, rang, resize_const):
         # resize
         gt_density[i] = cv2.resize(temp_gt_matrix, dim_resize)/resize_const
         print(i)
-    return gt_density
+    return gt_density.astype(dtype=np.float32)
 
 
 
