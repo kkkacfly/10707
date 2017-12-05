@@ -13,6 +13,7 @@ Objective: get density map from TRANCOS
 Input:
     - dim: original dimension (image)
     - dim_resize: (224, 224)
+    - rang: padding constant
     - resize_const: normalization factor (default: 0.16883)
 
 '''
@@ -28,7 +29,6 @@ def get_gt_density(filename, dim, dim_resize, rang, resize_const):
         temp_gt_matrix[rang[0][0]-1:rang[0][1], rang[1][0]-1:rang[1][1]] = gt[i][0]
         # resize
         gt_density[i] = cv2.resize(temp_gt_matrix, dim_resize)/resize_const
-        print(i)
     return gt_density.astype(dtype=np.float32)
 
 
@@ -73,9 +73,19 @@ def get_gt_count(filename, train_num, test_num):
     value = np.zeros(train_num+test_num)
     with open(filename) as f:
         lines = f.readlines()
-    for i in range(test_num+test_num):
+    for i in range(train_num+test_num):
         value[i] = float(lines[i].split()[0])
     return value[0:train_num], value[train_num:]
+
+
+# get ground truth from density map
+def get_gt_from_density(filename):
+    gt = loadmat(filename).get('gtDensities')
+    n = gt.shape[0]
+    gt_count = np.zeros(n)
+    for i in range(n):
+        gt_count[i] = np.sum(gt[i][0])
+    return gt_count
 
 
 # get global mean of dataset (full dataset)
