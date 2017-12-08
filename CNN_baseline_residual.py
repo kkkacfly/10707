@@ -1,8 +1,9 @@
 from __future__ import print_function
 import numpy as np
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.optimizers import SGD, Adam
-from keras.layers import Input, Conv2D, MaxPooling2D, AtrousConv2D, concatenate, Conv2DTranspose, Lambda, Reshape, Dense, Add, Flatten
+from keras.layers import Input, Conv2D, MaxPooling2D, AtrousConv2D, concatenate, Conv2DTranspose, Lambda, Reshape, Dense, Add, Flatten, Merge
+import keras.backend as K
 from keras import regularizers
 from util import *
 
@@ -51,16 +52,26 @@ def get_model(input_shape, weight_decay):
 
     # density output
     dnsty_output = Conv2D(1, (1, 1), activation='linear', kernel_initializer='he_normal',
-                          kernel_regularizer=regularizers.l2(0.01), padding='same', name='dnsty_output')(deconv2)
+                          kernel_regularizer=regularizers.l2(0.001), padding='same', name='dnsty_output')(deconv2)
 
-    model = Model(inputs=[inputs], outputs=[dnsty_output])
+    #count_output
+    count_flatten = Flatten()(dnsty_output)
+    count_sum = Lambda(sum_flatten_layer)(count_flatten)
+    count_flatten = Dense(100, activation='linear', kernel_initializer='he_normal',
+                          kernel_regularizer=regularizers.l2(0.001))(count_flatten)
+    count_fc = Dense(1,  activation='linear', kernel_initializer='he_normal',
+                     kernel_regularizer=regularizers.l2(0.001), name='count_prediction')(count_flatten)
+    #count_output = Add(name='count_output')([count_sum, count_fc])
+    count_output = Merge(name='count_output', mode='sum')([count_sum, count_fc])
+
+    model = Model(inputs=[inputs], outputs=[dnsty_output, count_output])
 
     return model
 
 
 # need to resize
 input_shape = (224, 224, 3)
-weight_decay = 1e-4
+weight_decay = 1e-5
 
 # load data
 p = 'data/'
@@ -70,11 +81,13 @@ Y_train = np.load(p+'Y_train.npy').astype(np.float32)
 
 
 # cropped training data
-X_train_bright = np.load(p+'X_train_brightness.npy')
+#X_train_bright = np.load(p+'X_train_brightness.npy')
+#Y_train_density_crop = np.load(p+'train_density_crop.npy')
+
 
 # vstack data
-X_train = np.vstack((X_train, X_train_bright))
-Y_train_density = np.vstack((Y_train_density, Y_train_density))
+#X_train = np.vstack((X_train, X_train_bright))
+#Y_train_density = np.vstack((Y_train_density, Y_train_density))
 
 # load testing data
 X_test = np.load(p+'X_test.npy')
@@ -97,21 +110,35 @@ Y_train = np.vstack((Y_train, Y_train))
 
 print('data augmentation complete')
 
-model = get_model(input_shape, weight_decay)
 
 adam = Adam(lr=0.0001)
+
+model = get_model(input_shape, weight_decay)
+model.compile(loss={'dnsty_output': mse_loss, 'count_output': mse_loss_count},
+              loss_weights={'dnsty_output': 1., 'count_output': 0.001},
+              optimizer=adam, metrics=['mae'])
+
+#model = load_model('CNN_model_br.h5', custom_objects={'mse_loss': mse_loss, 'mse_loss_count': mse_loss_count})
+
 print(model.summary())
 
-model.compile(loss={'dnsty_output': mse_loss}, optimizer=adam,  metrics=[mae_loss_density])
-hist = model.fit({'inputs': X_train}, {'dnsty_output': Y_train_density},
-                 validation_data=({'inputs': X_test}, {'dnsty_output': Y_test_density}),
+hist = model.fit({'inputs': X_train}, {'dnsty_output': Y_train_density, 'count_output': Y_train},
+                 validation_data=({'inputs': X_test}, {'dnsty_output': Y_test_density, 'count_output': Y_test}),
                  epochs=100, batch_size=16, verbose=2)
 
-# save model
-model.save('CNN_model_baseline_flbright.h5')
 
 # save loss
-np.save('train_loss_flbright.npy', hist.history)
+np.save('train_loss_br_ft_1.npy', hist.history)
+
+# save model
+model.save('CNN_model_br.h5')
 
 pred = model.predict(X_test)
-np.save('./result/pred_density_baseline_flbright.npy', pred)
+np.save('./result/pred_br_density.npy', pred[0])
+
+pred = model.predict(X_train)
+np.save('./result/pred_br_train_density.npy', pred[0])
+
+# save weights
+model.save_weights('br_weight.h5')
+

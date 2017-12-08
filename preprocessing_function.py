@@ -1,5 +1,5 @@
 from __future__ import print_function
-from PIL import Image, ImageEnhance, ImageChops
+from PIL import Image, ImageChops, ImageEnhance
 from scipy.io import loadmat
 import glob
 import numpy as np
@@ -13,9 +13,7 @@ Objective: get density map from TRANCOS
 Input:
     - dim: original dimension (image)
     - dim_resize: (224, 224)
-    - rang: padding constant
     - resize_const: normalization factor (default: 0.16883)
-
 '''
 def get_gt_density(filename, dim, dim_resize, rang, resize_const):
     gt = loadmat(filename).get('gtDensities')
@@ -29,6 +27,7 @@ def get_gt_density(filename, dim, dim_resize, rang, resize_const):
         temp_gt_matrix[rang[0][0]-1:rang[0][1], rang[1][0]-1:rang[1][1]] = gt[i][0]
         # resize
         gt_density[i] = cv2.resize(temp_gt_matrix, dim_resize)/resize_const
+        print(i)
     return gt_density.astype(dtype=np.float32)
 
 
@@ -42,13 +41,13 @@ Objective:
 Input:
     - dim: (224, 224)
     - global_mean: np.array([150, 152, 152])
-
 '''
 def img_2_array(img_path, img_type, mask_path, mask_type, file_num, dim, global_mean):
     keyword = img_path +'/*.' + img_type
     keyword_mask = mask_path +'/*.' + mask_type
     f_list = glob.glob(keyword)
     mask_list = glob.glob(keyword_mask)
+    #print(len(mask_list))
     data_array = np.zeros((file_num, dim[0], dim[1], 3))
     for i in range(file_num):
         print(i)
@@ -68,16 +67,6 @@ def img_2_array(img_path, img_type, mask_path, mask_type, file_num, dim, global_
     return data_array
 
 
-# get ground truth count
-def get_gt_count(filename, train_num, test_num):
-    value = np.zeros(train_num+test_num)
-    with open(filename) as f:
-        lines = f.readlines()
-    for i in range(train_num+test_num):
-        value[i] = float(lines[i].split()[0])
-    return value[0:train_num], value[train_num:]
-
-
 # get ground truth from density map
 def get_gt_from_density(filename):
     gt = loadmat(filename).get('gtDensities')
@@ -88,27 +77,17 @@ def get_gt_from_density(filename):
     return gt_count
 
 
-# get global mean of dataset (full dataset)
-def get_global_mean(img_path, img_type, file_num, raw_dim):
-    keyword = img_path +'/*.' + img_type
-    f_list = glob.glob(keyword)
-    mean_array = np.zeros(3)
-    const = raw_dim[0]*raw_dim[1]
-    for i in range(file_num):
-        #print i
-        img = Image.open(f_list[i])
-        temp_array = np.array(img, dtype=np.float32)
-        for j in range(3):
-            mean_array[j] += np.sum(temp_array[:,:,j])/const
-    return mean_array/file_num
 
 
-# --------------------------------------------------------------
-# data augmentation
+### --------------------------------------------------------------
+### data augmentation
 
 
-# input: raw image
-# crop idx: (100, 130)
+'''
+Objective: get cropped image from TRANCOS
+Input:
+crop idx: (100, 130)
+'''
 def random_crop_rgb(img_path, img_type, mask_path, mask_type, file_num, dim, global_mean, rand_arr):
     # raw input: (480, 640, 3)
     crop_size = (380, 510)
@@ -137,10 +116,13 @@ def random_crop_rgb(img_path, img_type, mask_path, mask_type, file_num, dim, glo
     return data_array
 
 
-# input density map
+'''
+Objective: get cropped density map from TRANCOS
+Input:
 # crop to: (380,510)
 # crop idx: (100, 130)
 # resize_constant: 0.2589
+'''
 def random_crop_density(filename, dim, dim_resize, rang, resize_const, rand_arr):
     crop_size = (380, 510)
     gt = loadmat(filename).get('gtDensities')
@@ -161,7 +143,10 @@ def random_crop_density(filename, dim, dim_resize, rang, resize_const, rand_arr)
     return gt_density.astype(dtype=np.float32)
 
 
-# input: raw image only
+'''
+Objective: get adjusted brightness/contrast image from TRANCOS
+Input:
+'''
 def random_brightness_contrast(img_path, img_type, mask_path, mask_type, file_num, dim, img_mean_path, option):
     keyword = img_path +'/*.' + img_type
     keyword_mask = mask_path +'/*.' + mask_type

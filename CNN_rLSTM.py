@@ -4,14 +4,13 @@ Objective: build & train model
 '''
 from __future__ import print_function
 import numpy as np
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.optimizers import SGD, Adam
 #from BilinearUpSampling import *
-from keras.layers import Input, Conv2D, MaxPooling2D, AtrousConv2D, concatenate, Conv2DTranspose, Lambda, Reshape, Dense, Add, Flatten, TimeDistributed, LSTM
+from keras.layers import Input, Conv2D, MaxPooling2D, AtrousConv2D, concatenate, Conv2DTranspose, Lambda, Reshape, Dense, Add, Flatten, TimeDistributed, LSTM, Merge
 import keras.backend as K
 from keras import regularizers
 import h5py
-
 
 
 # sum over tensor (with reshape)
@@ -19,6 +18,12 @@ def sum_tensor_block(tensor):
     tensor = Reshape((224,224))(tensor)
     tensor = K.sum(tensor, axis=1)
     return K.sum(tensor, axis=1, keepdims=True)
+
+
+# sum over flattened layer
+def sum_flatten_layer(tensor):
+    tensor = K.sum(tensor, axis=1, keepdims=True)
+    return tensor
 
 
 # mse loss for density
@@ -104,17 +109,16 @@ def build_model(input_shape, weight_decay, weight_decay_reg):
                                    kernel_regularizer=regularizers.l2(weight_decay_reg), padding='same'), name='dnsty_output')(deconv2)
 
     # count_output
-    count_sum = TimeDistributed(Lambda(sum_tensor_block), name='count_sum')(dnsty_output)
     count_flatten = TimeDistributed(Flatten(), name='count_flatten')(dnsty_output)
+    count_sum = TimeDistributed(Lambda(sum_flatten_layer), name='count_sum')(count_flatten)
     lstm1 = LSTM(100, return_sequences=True, name='lstm_1')(count_flatten)
     lstm2 = LSTM(100, return_sequences=True, name='lstm_2')(lstm1)
     lstm3 = LSTM(100, return_sequences=True, name='lstm_3')(lstm2)
     count_flatten = TimeDistributed(Dense(100, activation='relu', kernel_initializer='he_normal',
-                                          kernel_regularizer=regularizers.l2(weight_decay)), name='fully_connected')(lstm3)
+                                          kernel_regularizer=regularizers.l2(weight_decay_reg)), name='fully_connected')(lstm3)
     count_fc = TimeDistributed(Dense(1, activation='linear', kernel_initializer='he_normal',
                                      kernel_regularizer=regularizers.l2(weight_decay_reg)), name='count_prediction')(count_flatten)
-    #count_output = TimeDistributed(Add(name='count_output')([count_sum, count_fc]))
-    count_output = Add(name='count_output')([count_sum, count_fc])
+    count_output = Merge(name='count_output', mode='sum')([count_sum, count_fc])
 
     model = Model(inputs=[inputs], outputs=[dnsty_output, count_output])
 
@@ -178,7 +182,25 @@ def model_fit(X_train, Y_train_density, Y_train_count, model, time_step, batch_s
                              {'dnsty_output': Y_train_density_curr, 'count_output': Y_train_count_curr},
                              epochs=1, batch_size=batch_size_curr, verbose=2)
 
-    return model
+    return model, hist
+
+
+# convert input with time step
+def get_sequential_data(X_train, Y_train_density, Y_train_count, time_step):
+    train_n = X_train.shape[0]
+    new_n = train_n - time_step
+    train_seq_rang = range(0, train_n - time_step)
+    # initial sequence
+    X_train_s = np.zeros((new_n, time_step, 224, 224, 3))
+    Y_train_density_s = np.zeros((new_n, time_step, 224, 224, 1))
+    Y_train_count_s = np.zeros((new_n, time_step, 1))
+    for i in train_seq_rang:
+        print(i)
+        X_train_s[i] = X_train[i:i+time_step]
+        Y_train_density_s[i] = Y_train_density[i:i+time_step]
+        Y_train_count_s[i] = Y_train_count[i:i+time_step]
+    return X_train_s, Y_train_density_s, Y_train_count_s
+
 
 
 # main
@@ -186,12 +208,12 @@ def model_fit(X_train, Y_train_density, Y_train_count, model, time_step, batch_s
 # need to resize
 time_step = 5
 input_shape = (5, 224, 224, 3)
-weight_decay = 1e-4
-weight_decay_reg = 1e-2
+weight_decay = 1e-6
+weight_decay_reg = 1e-3
 batch_size = 4
 epochs = 100
 lr = 1e-4
-weights = (1.0, 0.01)
+weights = (1.0, 0.001)
 
 
 # load data
@@ -207,17 +229,39 @@ Y_test_count = np.load(p+'Y_test.npy').astype(np.float32)
 
 
 # add dimension
-Y_train_density = np.expand_dims(Y_train_density, axis=3)
-Y_test_density = np.expand_dims(Y_test_density, axis=3)
-Y_train_count = np.expand_dims(Y_train_count, axis=1)
-Y_test_count = np.expand_dims(Y_test_count, axis=1)
+Y_train_density = np.expand_dims(Y_train_density, axis=-1)
+Y_test_density = np.expand_dims(Y_test_density, axis=-1)
+Y_train_count = np.expand_dims(Y_train_count, axis=-1)
+Y_test_count = np.expand_dims(Y_test_count, axis=-1)
 
+
+
+# get sequential data
+X_train, Y_train_density, Y_train_count = get_sequential_data(X_train, Y_train_density, Y_train_count, time_step)
+
+X_test, Y_test_density, Y_test_count = get_sequential_data(X_test, Y_test_density, Y_test_count, time_step)
 
 model = build_model(input_shape, weight_decay, weight_decay_reg)
+
+#model = load_model('FCN_model.h5', custom_objects={'mse_loss': mse_loss, 'mse_loss_count': mse_loss_count})
 
 print(model.summary())
 
 model_compile(model, mse_loss, mse_loss_count, 'mae', 'adam', lr, weights)
 
-model, _ = model_fit(X_train, Y_train_density, Y_train_count, model, time_step, batch_size, epochs)
+hist = model.fit({'inputs': X_train}, {'dnsty_output': Y_train_density, 'count_output': Y_train_count},
+                 validation_data=({'inputs': X_test}, {'dnsty_output': Y_test_density, 'count_output': Y_test_count}),
+                 epochs=50, batch_size=4, verbose=2)
 
+
+# save loss
+np.save('train_loss_fcn_rlstm_ft_1.npy', hist.history)
+
+# save model
+model.save('FCN_model.h5')
+
+pred = model.predict(X_test)
+np.save('./result/pred_fcn_rlstm_density_ft_1.npy', pred[0])
+
+# save weights
+model.save_weights('fcn_weight.h5')
