@@ -6,42 +6,10 @@ from __future__ import print_function
 import numpy as np
 from keras.models import Model, load_model
 from keras.optimizers import SGD, Adam
-#from BilinearUpSampling import *
 from keras.layers import Input, Conv2D, MaxPooling2D, AtrousConv2D, concatenate, Conv2DTranspose, Lambda, Reshape, Dense, Add, Flatten, TimeDistributed, LSTM, Merge
 import keras.backend as K
 from keras import regularizers
-import h5py
-
-
-# sum over tensor (with reshape)
-def sum_tensor_block(tensor):
-    tensor = Reshape((224,224))(tensor)
-    tensor = K.sum(tensor, axis=1)
-    return K.sum(tensor, axis=1, keepdims=True)
-
-
-# sum over flattened layer
-def sum_flatten_layer(tensor):
-    tensor = K.sum(tensor, axis=1, keepdims=True)
-    return tensor
-
-
-# mse loss for density
-def mse_loss(y_true, y_pred):
-    diff = K.square(y_true-y_pred)
-    t_sum = K.sum(diff, axis=1)
-    t_sum = K.sum(t_sum, axis=1)
-    return K.mean(t_sum)
-
-
-# mse loss for count
-def mse_loss_count(y_true, y_pred):
-    diff = K.square(y_true - y_pred)
-    return K.mean(diff)
-
-# data augmentation
-def data_augment():
-    pass
+from util import *
 
 
 # build model
@@ -157,8 +125,8 @@ Input:
     - model: compiled model
     
 Output:
-    - 
-     
+    - model: fitted keras model
+    - hist: loss history 
 '''
 # train model
 def model_fit(X_train, Y_train_density, Y_train_count, model, time_step, batch_size, epochs):
@@ -241,13 +209,13 @@ X_train, Y_train_density, Y_train_count = get_sequential_data(X_train, Y_train_d
 
 X_test, Y_test_density, Y_test_count = get_sequential_data(X_test, Y_test_density, Y_test_count, time_step)
 
-model = build_model(input_shape, weight_decay, weight_decay_reg)
+#model = build_model(input_shape, weight_decay, weight_decay_reg)
 
-#model = load_model('FCN_model.h5', custom_objects={'mse_loss': mse_loss, 'mse_loss_count': mse_loss_count})
+model = load_model('FCN_model.h5', custom_objects={'mse_loss': mse_loss, 'mse_loss_count': mse_loss_count})
 
 print(model.summary())
 
-model_compile(model, mse_loss, mse_loss_count, 'mae', 'adam', lr, weights)
+#model_compile(model, mse_loss, mse_loss_count, 'mae', 'adam', lr, weights)
 
 hist = model.fit({'inputs': X_train}, {'dnsty_output': Y_train_density, 'count_output': Y_train_count},
                  validation_data=({'inputs': X_test}, {'dnsty_output': Y_test_density, 'count_output': Y_test_count}),
@@ -255,13 +223,13 @@ hist = model.fit({'inputs': X_train}, {'dnsty_output': Y_train_density, 'count_o
 
 
 # save loss
-np.save('train_loss_fcn_rlstm_ft_1.npy', hist.history)
+np.save('train_loss_fcn_rlstm_ft_2.npy', hist.history)
 
 # save model
 model.save('FCN_model.h5')
 
-pred = model.predict(X_test)
-np.save('./result/pred_fcn_rlstm_density_ft_1.npy', pred[0])
+pred = model.predict(X_test, batch_size=4)
+np.save('./result/pred_fcn_rlstm_density_ft_2.npy', pred[0])
 
 # save weights
 model.save_weights('fcn_weight.h5')
